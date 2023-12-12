@@ -1,4 +1,5 @@
 from scipy.io import loadmat
+from scipy import signal
 import os
 import numpy as np
 import pandas as pd
@@ -11,8 +12,29 @@ window_size = 1200  # 3s
 window_overlap = 400  # 1s
 processing_chunk_num_windows = 30
 
+power_line_freq = 60
 
-def segment_signal_multichannel(signals, window_size, overlap, Fs, window_id_start=0, window_start_ind=0):
+
+def filter_powerline_noise(signals):
+    """Expects signals to be number of channels x number of timepoints
+    """
+    sampling_freq = Fs
+
+    # Calculate the notch filter parameters
+    nyquist = 0.5 * sampling_freq
+    notch_freq = power_line_freq / nyquist
+
+    # Design the notch filter
+    b, a = signal.iirnotch(notch_freq, Q=30)  # Adjustable Q-factor
+
+    # Applying the notch filter to EEG data
+    filtered_data2 = signal.filtfilt(b, a, signals, axis=0)
+
+    return filtered_data2
+
+
+def segment_signal_multichannel(signals, window_size, overlap, Fs, window_id_start=0, window_start_ind=0,
+                                remove_powerline=False):
     """ expects signals to be number of channels x number of eeg samples
     """
     window_id = window_id_start
@@ -32,6 +54,9 @@ def segment_signal_multichannel(signals, window_size, overlap, Fs, window_id_sta
         this_signal = np.zeros((window_size, num_channels))
         this_time[:window_end_ind - window_start_ind] = t_axis[window_start_ind:window_end_ind]
         this_signal[:window_end_ind - window_start_ind, :] = signals[window_start_ind:window_end_ind, :]
+
+        if remove_powerline:
+            this_signal = filter_powerline_noise(this_signal)
 
         this_df = pd.DataFrame({"window_id": window_id, "time": this_time})
         for i, channel_name in enumerate(signal_cols):
@@ -58,7 +83,7 @@ def get_data_key_from_filename(filename):
     return "_".join(filename)
 
 
-def generate_and_save_windowed_data():
+def generate_and_save_windowed_data_train_undersamp():
     root_folder = "/Volumes/LACIE SHARE/seizure-prediction"
     output_folder = "/Volumes/LACIE SHARE/seizure-prediction-outputs/windows_3sduration_1soverlap"
     train_files_undersamp = [f.strip() for f in open("./data/train_undersampled.txt").readlines()]
@@ -171,6 +196,58 @@ def extract_feat_train_undersampled():
     print("Done")
 
 
+def window_and_extract_features_test():
+    root_folder = "/Volumes/LACIE SHARE/seizure-prediction"
+    output_folder = "/Volumes/LACIE SHARE/seizure-prediction-outputs/test_windows_3sduration_1soverlap_features"
+    tempoutpath = os.path.join(output_folder, "temp.csv")
+    test_files = [f.strip() for f in open("./data/test.txt").readlines()]
+    for i, filename in enumerate(test_files):
+        print(f"Segmenting file {i}/{len(test_files)}: {filename.split('/')[-1]}")
+        filepath = os.path.join(root_folder, filename)
+        mat_data = loadmat(filepath)
+        signals = np.array(mat_data[get_data_key_from_filename(filename)][0, 0][0])
+        outfilename = filename.split("/")[-1]
+        outfilename = outfilename.split(".")[0] + "_features.csv"
+        outpath = os.path.join(output_folder, outfilename)
+
+        # # clear output file if it already exists
+        # if os.path.exists(outpath):
+        #     os.remove(outpath)
+
+        window_start_ind = 0
+        window_end_ind = window_size + (window_size - window_overlap) * (processing_chunk_num_windows - 1)
+        window_id_start = 0
+        while window_start_ind < signals.shape[1]:
+            chunk_df = segment_signal_multichannel(signals[:, window_start_ind:window_end_ind], window_size,
+                                                   window_overlap,
+                                                   Fs, window_id_start, window_start_ind, True)
+            # print(chunk_df.head())
+
+            if window_start_ind == 0:
+                # write header
+                chunk_df.to_csv(tempoutpath, index=False, mode='w')
+            else:
+                # exclude  header
+                chunk_df.to_csv(tempoutpath, index=False, mode='a', header=False)
+            # print(chunk_df['window_id'].max())
+
+            window_start_ind = window_end_ind - window_overlap
+
+            window_end_ind = window_start_ind + window_size + (window_size - window_overlap) * (
+                    processing_chunk_num_windows - 1)
+
+            window_id_start += processing_chunk_num_windows
+
+        # results = pd.read_csv(outpath)
+        # print(results.value_counts(subset='window_id').max())
+        window_df = pd.read_csv(tempoutpath)
+        feat = extract_feat_per_window(window_df)
+        feat.to_csv(outpath, index=False)
+    print("Done")
+
+
+
 if __name__ == '__main__':
     # generate_and_save_windowed_data()
-    extract_feat_train_undersampled()
+    # extract_feat_train_undersampled()
+    window_and_extract_features_test()
