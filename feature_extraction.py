@@ -5,12 +5,15 @@ import numpy as np
 import pandas as pd
 from tsfresh.feature_extraction.feature_calculators import abs_energy
 from tsfresh.feature_extraction import extract_features
+from sklearn.model_selection import train_test_split
+import time
 
 
 Fs = 399.6097561
-window_size = 1200  # 3s
-window_overlap = 400  # 1s
+window_size = 400 # 1s  #1200  # 3s
+window_overlap = 200 # 0.5s #400  # 1s
 processing_chunk_num_windows = 30
+sample_length = 4000 # 10s
 
 power_line_freq = 60
 
@@ -246,8 +249,207 @@ def window_and_extract_features_test():
     print("Done")
 
 
+data_root = '/Volumes/LACIE SHARE/seizure-prediction'
+test_real_feature_folder = '/Volumes/LACIE SHARE/seizure-prediction-outputs/real_10s_segments_windows_1sdur_1soverlap'
+def extract_real_test_features(files):
+    for filenum, filename in enumerate(files):
+        start = time.time()
+        filepath = os.path.join(data_root, filename)
+        mat_data = loadmat(filepath)
+        signals = np.array(mat_data[get_data_key_from_filename(filename)][0, 0][0])
+        outfilename = filename.split("/")[-1]
+        outfilename = outfilename.split(".")[0] + "_features.csv"
+        outpath = os.path.join(test_real_feature_folder, outfilename)
+        # skip if the features were already extracted for the file
+        if os.path.exists(outpath):
+            continue
+
+        this_class = 0
+        if "preictal" in outfilename:
+            this_class = 1
+
+        # loop through all segments of length sample_length
+        start_ind = 0
+        window_id_start = 0
+        while (start_ind < signals.shape[1]) and (start_ind + sample_length < signals.shape[1]):
+            this_segment = signals[:, start_ind:start_ind + sample_length]
+            this_segment_window_df = segment_signal_multichannel(this_segment, window_size, window_overlap, Fs,
+                                                                 window_id_start=window_id_start, window_start_ind=0,
+                                                                 remove_powerline=False)
+            if start_ind == 0:
+                this_all_windows_df = this_segment_window_df
+            else:
+                this_all_windows_df = pd.concat((this_all_windows_df, this_segment_window_df))
+
+            start_ind += sample_length
+            window_id_start += 19
+
+        # print(this_segment_window_df)
+        this_file_features = extract_feat_per_window(this_all_windows_df)
+        # print(this_segment_features)
+
+        original_col_names = this_file_features.columns
+        flattened_col_names = []
+        for i in range(19):
+            for name in original_col_names:
+                flattened_col_names.append("window_" + str(i) + "_" + name)
+
+        this_file_features = this_file_features.to_numpy().reshape(-1, len(original_col_names)*19)
+        this_file_features = pd.DataFrame(this_file_features, columns=flattened_col_names)
+        this_file_features['class'] = this_class
+
+        this_file_features.to_csv(outpath, index=False, mode='w')
+        dur = time.time() - start
+        print(f"Processing file {filenum+1}/{len(files)} took {dur:.3f}s")
+
+
+test_wgan_feature_folder = '/Volumes/LACIE SHARE/seizure-prediction-outputs/wgan_10s_segments_windows_1sdur_1soverlap'
+def extract_wgan_test_features(files):
+    for filenum, filename in enumerate(files):
+        start = time.time()
+        signals = np.transpose(np.load(filename))
+        outfilename = filename.split("/")[-1]
+        outfilename = outfilename.split(".")[0] + "_features.csv"
+        outpath = os.path.join(test_wgan_feature_folder, outfilename)
+        # skip if the features were already extracted for the file
+        if os.path.exists(outpath):
+            continue
+
+        this_class = 0
+        if "preictal" in outfilename:
+            this_class = 1
+
+        # loop through all segments of length sample_length
+        start_ind = 0
+        window_id_start = 0
+        while (start_ind < signals.shape[1]) and (start_ind + sample_length < signals.shape[1]):
+            this_segment = signals[:, start_ind:start_ind + sample_length]
+            this_segment_window_df = segment_signal_multichannel(this_segment, window_size, window_overlap, Fs,
+                                                                 window_id_start=window_id_start, window_start_ind=0,
+                                                                 remove_powerline=False)
+            if start_ind == 0:
+                this_all_windows_df = this_segment_window_df
+            else:
+                this_all_windows_df = pd.concat((this_all_windows_df, this_segment_window_df))
+
+            start_ind += sample_length
+            window_id_start += 19
+
+        # print(this_segment_window_df)
+        this_file_features = extract_feat_per_window(this_all_windows_df)
+        # print(this_segment_features)
+
+        original_col_names = this_file_features.columns
+        flattened_col_names = []
+        for i in range(19):
+            for name in original_col_names:
+                flattened_col_names.append("window_" + str(i) + "_" + name)
+
+        this_file_features = this_file_features.to_numpy().reshape(-1, len(original_col_names)*19)
+        this_file_features = pd.DataFrame(this_file_features, columns=flattened_col_names)
+        this_file_features['class'] = this_class
+
+        this_file_features.to_csv(outpath, index=False, mode='w')
+        dur = time.time() - start
+        print(f"Processing file {filenum+1}/{len(files)} took {dur:.3f}s")
+
+
+test_ddpm_feature_folder = '/Volumes/LACIE SHARE/seizure-prediction-outputs/ddpm_10s_segments_windows_1sdur_1soverlap'
+X_min_preictal = -2147
+X_max_preictal = 2081
+X_min_interictal = -2153
+X_max_interictal = 1925
+
+def extract_ddpm_test_features(files):
+    for filenum, filename in enumerate(files):
+        start = time.time()
+        signals = np.load(filename)
+        outfilename = filename.split("/")[-1]
+        outfilename = outfilename.split(".")[0] + "_features.csv"
+        outpath = os.path.join(test_ddpm_feature_folder, outfilename)
+        # skip if the features were already extracted for the file
+        if os.path.exists(outpath):
+            continue
+
+        this_class = 0
+        if "preictal" in outfilename:
+            this_class = 1
+            signals = signals * (X_max_preictal - X_min_preictal) + X_min_preictal
+        else:
+            signals = signals * (X_max_interictal - X_min_interictal) + X_min_interictal
+
+        # loop through all segments of length sample_length
+        start_ind = 0
+        window_id_start = 0
+        for samp_num in range(signals.shape[0]):
+            this_segment = np.squeeze(signals[samp_num, :, :])
+            this_segment_window_df = segment_signal_multichannel(this_segment, window_size, window_overlap, Fs,
+                                                                 window_id_start=window_id_start, window_start_ind=0,
+                                                                 remove_powerline=False)
+            if window_id_start == 0:
+                this_all_windows_df = this_segment_window_df
+            else:
+                this_all_windows_df = pd.concat((this_all_windows_df, this_segment_window_df))
+
+            start_ind += sample_length
+            window_id_start += 19
+
+        # print(this_segment_window_df)
+        this_file_features = extract_feat_per_window(this_all_windows_df)
+        # print(this_segment_features)
+
+        original_col_names = this_file_features.columns
+        flattened_col_names = []
+        for i in range(19):
+            for name in original_col_names:
+                flattened_col_names.append("window_" + str(i) + "_" + name)
+
+        this_file_features = this_file_features.to_numpy().reshape(-1, len(original_col_names)*19)
+        this_file_features = pd.DataFrame(this_file_features, columns=flattened_col_names)
+        this_file_features['class'] = this_class
+
+        this_file_features.to_csv(outpath, index=False, mode='w')
+        dur = time.time() - start
+        print(f"Processing file {filenum+1}/{len(files)} took {dur:.3f}s")
+
 
 if __name__ == '__main__':
     # generate_and_save_windowed_data()
     # extract_feat_train_undersampled()
-    window_and_extract_features_test()
+    # window_and_extract_features_test()
+
+    # test_files = [f.strip() for f in open("./data/test.txt").readlines() if "Dog_5" not in f]
+    # interictal_test_files = [f for f in test_files if "interictal" in f and "Dog_5" not in f]
+    # preictal_test_files = [f for f in test_files if "preictal" in f and "Dog_5" not in f]
+    # test_classes = np.concatenate((np.zeros((len(interictal_test_files),)), np.ones((len(preictal_test_files),))))
+    #
+    # eval_train_files, eval_test_files = train_test_split(interictal_test_files + preictal_test_files,
+    #                                                      test_size=1.0 / 3, random_state=8, stratify=test_classes)
+    # eval_train_preictal_files = [f for f in eval_train_files if "preictal" in f]
+    # eval_train_interictal_files = [f for f in eval_train_files if "interictal" in f]
+    # print(len(eval_train_preictal_files))
+    # print(len(eval_train_interictal_files))
+    # eval_train_interictal_files_undersamp = np.random.choice(eval_train_interictal_files, len(eval_train_preictal_files)).tolist()
+    # # print(type(eval_train_interictal_files_undersamp))
+    # with open('data/eval_train_files.txt', 'w') as f:
+    #     for file_name in eval_train_interictal_files_undersamp + eval_train_preictal_files:
+    #         f.write(file_name + "\n")
+    # with open('data/eval_test_files.txt', 'w') as f:
+    #     for file_name in eval_test_files:
+    #         f.write(file_name + "\n")
+
+
+    #eval_train_files = [f.strip() for f in open("./data/eval_train_files.txt").readlines()]
+    #eval_test_files = [f.strip() for f in open("./data/eval_test_files.txt").readlines()]
+    # print(len(eval_train_files+eval_test_files))
+    # wgan_files = ["./interictal_set1.npy", "./interictal_set2.npy", "./interictal_set3.npy",
+    #               "./preictal_set1.npy", "./preictal_set2.npy", "./preictal_set3.npy"]
+    # extract_wgan_test_features(wgan_files)
+
+    # test_file = ["Dog_3/Dog_3/Dog_3_interictal_segment_0807.mat"]
+    # extract_real_test_features(test_file)
+
+
+    ddpm_files = ["/Volumes/LACIE SHARE/seizure-prediction-outputs/generated_samples_preictal_ddpm.npy",
+                  "/Volumes/LACIE SHARE/seizure-prediction-outputs/generated_samples_interictal_ddpm.npy"]
+    extract_ddpm_test_features(ddpm_files)
