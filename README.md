@@ -59,7 +59,7 @@ This study demonstrates that synthetic iEEG data generated via WGAN and DDPM app
 The authors contributed equally. [S. Kaushik](https://github.com/shoibolina) explored preprocessing methods and developed the DDPM model. [A. Maloney-Bertelli](https://github.com/arberetum) coded the classification models for evaluation as well as the WGAN.
 
 ---
-<i>For a detailed account of the methodology, experiments, and analyses, please refer to the accompanying project report.</i>
+<i>For a detailed account of the methodology, experiments, and analyses, please refer to the accompanying [project report](https://github.com/arberetum/synthetic_eeg/blob/main/CS_534_Final_Report_Shoibolina_Aiden.pdf) .</i>
 
 ---
 ### References
